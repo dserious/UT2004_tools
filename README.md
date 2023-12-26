@@ -1,0 +1,1 @@
+Creates screenshots of maps from UT2004
