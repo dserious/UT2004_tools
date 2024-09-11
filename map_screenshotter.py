@@ -1,14 +1,41 @@
+# This is absolute dumpsterfire-grade code, and I'm sorry in advance.
+# Just wanted to get this working expeditiously
+
 import os
 import time
 import pywinauto
 import subprocess
+from PIL import Image
+
 from pywinauto.application import Application
 from pywinauto import mouse
 
-ut2004_directory = "/UT2004/"
-process_dm_only = True
+# GENERATE METADATA BY EXPORTING T3D FILES? (Needed for generating screenshots)
+# This can be used to build a database of map weapon and vehicle count data.
+get_metadata = False
+
+# LAUNCH THE GAME AND GENERATE SCREENSHOTS (This might need to run a while. Screenshots will go in ./ScreenShots/)
+get_screenshots = False
+
+# HOW MANY SCREENSHOTS TO TAKE OF EACH MAP
 number_of_screenshots = 3
 
+# GENERATE UTX FILE?
+make_utx = True
+
+# UTX FILENAME
+utx_filename = "WSVotingScreenshots"
+
+# BASE DIRECTORY (the windows ut2004.exe binary is expected to be in ... ./system/ut2004.exe)
+ut2004_directory = "E:/CO30_BACKUP-9-10-24/_/"
+
+# SCREENSHOTS OUTPUT SUBDIRECTORY (Postprocessing directory for importable-bmps)
+screenshot_output_directory = "/ScreenShots-output/"
+
+# IGNORE MAPS THAT DONT START WITH DM-
+process_dm_only = True
+
+# NATIVE PACKAGES TO IGNORE
 native_packages = ['None', 'False', 'Engine']
 
 
@@ -26,40 +53,58 @@ def main():
            os.makedirs(ut2004_directory + "export")
     
         f = os.path.join(ut2004_directory + "Maps", filename)
-        t3d = os.path.join(ut2004_directory + "export", "myLevel.t3d")
+        #t3d = os.path.join(ut2004_directory + "export", "myLevel.t3d")
         # checking if it is a file
         if os.path.isfile(f):
             print(f)
-            
-            #export it to ASCII with UCC
-            execute_string = '%sSystem/ucc.exe batchexport %s Level t3d ../export' % (ut2004_directory, f)
-            print(execute_string)
-            ucc = subprocess.run(execute_string.split(), capture_output=True)
-            print('Exporting actors')
-            if "Success" in ucc.stdout.decode('UTF-8'):
-                # Export success means high probability that dependencies are in place
-                if check_if_all_screenshots_exist(filename):
-                    print('Screenshot already exists')
-                else:
-                    if not generate_screenshots(filename):
-                        print('Couldnt capture screenshots, something crashed. Skipping map')
-                        continue
+            if get_metadata:
+                #export it to ASCII with UCC if map hasn't already been exported
+                if not os.path.isfile(ut2004_directory + "export/" + filename + ".t3d"):
+                    execute_string = '%sSystem/ucc.exe batchexport %s Level t3d ../export' % (ut2004_directory, f)
+                    print(execute_string)
+                    ucc = subprocess.run(execute_string.split(), capture_output=True)
+                    print('Exporting actors')
                     try:
-                        os.rename(ut2004_directory + "/export/myLevel.t3d", ut2004_directory + "/export/%s.t3d" % filename)
-                    except FileExistsError:
-                        print('file already exists')
+                        os.rename(ut2004_directory + "export/myLevel.t3d", ut2004_directory + "export/" + filename + ".t3d")
+                    except FileNotFoundError:
+                        print('ucc export failed')
+                if os.path.isfile(ut2004_directory + "export/" + filename + ".t3d"):
+                    t3d = ut2004_directory + "export/" + filename + ".t3d"
+                else:
+                    continue
+            if get_screenshots:
+                if "Success" in ucc.stdout.decode('UTF-8'):
+                    # Export success means high probability that dependencies are in place
+                    if check_if_all_screenshots_exist(filename):
+                        print('Screenshot already exists')
+                    else:
+                        if not generate_screenshots(filename):
+                            print('Couldnt capture screenshots, something crashed. Skipping map')
+                            continue
+                        try:
+                            os.rename(ut2004_directory + "/export/myLevel.t3d", ut2004_directory + "/export/%s.t3d" % filename)
+                        except FileExistsError:
+                            print('file already exists')
+                        except FileNotFoundError as e:
+                            print('myLevel.t3d not generated for some reason..')
+                            
             # actors = extract_text_between_actors(ut2004_directory + "/export/%s.t3d" % filename)
-            actors = extract_text_between_actors(t3d)
-            level_info_actor = actor_search(actors, "LevelInfo")
-            map_title = get_value_from_actor(level_info_actor, "Title")
-            textures = find_all_textures_in_actors(actors)
-            sounds = find_all_sounds_in_actors(actors)
-            weapons = get_all_weapon_counts(actors)
-            vehicles = get_all_vehicle_counts(actors)
-            print(textures)
-            print(sounds)
-            print(weapons)
-            print(vehicles)
+            if get_metadata:
+                actors = extract_text_between_actors(t3d)
+                level_info_actor = actor_search(actors, "LevelInfo")
+                map_title = get_value_from_actor(level_info_actor, "Title")
+                textures = find_all_textures_in_actors(actors)
+                sounds = find_all_sounds_in_actors(actors)
+                weapons = get_all_weapon_counts(actors)
+                vehicles = get_all_vehicle_counts(actors)
+                print(textures)
+                print(sounds)
+                print(weapons)
+                print(vehicles)
+    if make_utx:
+        print('resizing screenshots...')
+        crop_and_resize_images(ut2004_directory + "ScreenShots", ut2004_directory + screenshot_output_directory)
+        generate_utx()
             
 def check_if_all_screenshots_exist(map):
     # check if screnshoots already exists
@@ -254,6 +299,61 @@ def extract_text_between_actors(filename):
             current_actor += line + "\n"
             
     return actor_data
+ 
+def crop_and_resize_images(directory, output_directory, size=(512, 512)):
+    # Create output directory if it doesn't exist
+    if not os.path.exists(output_directory):
+        os.makedirs(output_directory)
+
+    # Loop over all BMP files in the directory
+    for filename in os.listdir(directory):
+        # If process_dm_only is True, skip files that don't start with "DM-"
+        if process_dm_only and not filename.startswith("DM-"):
+            continue
+
+        # Process only files that contain ".ut2-1" in the filename
+        if ".ut2-1" not in filename:
+            continue
+            
+        print(filename)
+
+        if filename.endswith(".bmp"):
+            img_path = os.path.join(directory, filename)
+            
+            # Open the image
+            with Image.open(img_path) as img:
+                # Crop the image to a square by selecting the center
+                width, height = img.size
+                min_dim = min(width, height)
+                
+                # Calculate cropping box
+                left = (width - min_dim) / 2
+                top = (height - min_dim) / 2
+                right = (width + min_dim) / 2
+                bottom = (height + min_dim) / 2
+                
+                # Crop and resize the image
+                img_cropped = img.crop((left, top, right, bottom))
+                img_resized = img_cropped.resize(size)
+
+                # Reduce to 256 colors (Pillow uses P mode for palettes)
+                img_reduced = img_resized.convert("P", palette=Image.ADAPTIVE, colors=256)
+
+                # Modify the filename by removing ".ut2-1"
+                output_filename = filename.replace(".ut2-1", "")
+                output_path = os.path.join(output_directory, output_filename)
+
+                # Save the image in the output directory
+                img_reduced.save(output_path)
+
+    print(f"Processed images saved to {output_directory}")
+    
+def generate_utx():
+    print('Generating UTX...')
+    execute_string = '%sSystem/ucc.exe editor.batchimport ..\%s.utx texture ..\%s\*.bmp' % (ut2004_directory, utx_filename, os.path.join(ut2004_directory, screenshot_output_directory))
+    print(execute_string)
+    ucc = subprocess.run(execute_string.split(), capture_output=True)
+    print(ucc)
 
 
 if __name__ == "__main__":
